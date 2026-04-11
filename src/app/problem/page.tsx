@@ -1,99 +1,180 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, Suspense } from 'react';
+import { useSearchParams } from 'next/navigation';
+import { BASE64URL, decodeData } from '@/lib/util';
+import { GameState, CellNumber, EdgeState, CellColor } from '@/types/game';
 
-const pulzzeDataStr = [
-  "10    3 ",
-  " 3 23103",
-  "      1 ",
-  "3103    ",
-  "    2230",
-  " 3      ",
-  "13020 0 ",
-  " 2    32"  
-];
+function ProblemContent() {
+  const searchParams = useSearchParams();
+  const dataParam = searchParams.get('data');
 
-const parsePuzzleData = (dataStr: string[]): (number | null)[][] => {
-  return dataStr.map(row => 
-    row.split('').map(char => char === ' ' ? null : parseInt(char, 10))
-  );
-};
+  const [gameState, setGameState] = useState<GameState | null>(null);
 
-const puzzleData = parsePuzzleData(pulzzeDataStr);
+  useEffect(() => {
+    let gridWidth = 8;
+    let gridHeight = 8;
+    let decodedData: (number | null)[][] = [];
+    let isDataValid = false;
 
-export default function Home() {
-  const GRID_SIZE = 8;
+    if (dataParam && dataParam.length >= 2) {
+      gridWidth = BASE64URL.indexOf(dataParam[0]);
+      gridHeight = BASE64URL.indexOf(dataParam[1]);
+      if (gridWidth <= 0) gridWidth = 8;
+      if (gridHeight <= 0) gridHeight = 8;
+      
+      const expectedDataLength = Math.ceil((gridWidth * gridHeight) / 2);
+      if (dataParam.length - 2 === expectedDataLength) {
+        isDataValid = true;
+        decodedData = decodeData(dataParam.substring(2), gridWidth, gridHeight);
+      } else {
+        alert('データが間違っています');
+      }
+    }
+
+    if (!isDataValid) {
+      const pulzzeDataStr = [
+        "10    3 ",
+        " 3 23103",
+        "      1 ",
+        "3103    ",
+        "    2230",
+        " 3      ",
+        "13020 0 ",
+        " 2    32"  
+      ];
+      gridWidth = 8;
+      gridHeight = 8;
+      decodedData = pulzzeDataStr.map(row => 
+        row.split('').map(char => char === ' ' ? null : parseInt(char, 10))
+      );
+    }
+
+    setGameState({
+      width: gridWidth,
+      height: gridHeight,
+      puzzleData: decodedData as CellNumber[][],
+      hLines: Array.from({ length: gridHeight + 1 }, () => Array(gridWidth).fill('none')),
+      vLines: Array.from({ length: gridHeight }, () => Array(gridWidth + 1).fill('none')),
+      cellColors: Array.from({ length: gridHeight }, () => Array(gridWidth).fill(0))
+    });
+  }, [dataParam]);
+
   const CELL_SIZE = 48;
   const EDGE_THICKNESS = 16; // Hit area thickness for easier clicking/hovering
   const LINE_THICKNESS = 4; // Actual visual line thickness (optional, but we can just use the background color for now)
 
-  type EdgeState = 'none' | 'line' | 'cross';
-
-  const [hLines, setHLines] = useState<EdgeState[][]>(
-    Array.from({ length: GRID_SIZE + 1 }, () => Array(GRID_SIZE).fill('none'))
-  );
-  
-  const [vLines, setVLines] = useState<EdgeState[][]>(
-    Array.from({ length: GRID_SIZE }, () => Array(GRID_SIZE + 1).fill('none'))
-  );
-
-  const [cellColors, setCellColors] = useState<number[][]>(
-    Array.from({ length: GRID_SIZE }, () => Array(GRID_SIZE).fill(0))
-  );
-
   const handleHClick = (x: number, y: number) => {
-    const newLines = [...hLines];
-    newLines[y] = [...newLines[y]];
-    newLines[y][x] = newLines[y][x] === 'line' ? 'none' : 'line';
-    setHLines(newLines);
+    if (!gameState) return;
+    const newHLines = gameState.hLines.map(row => [...row]);
+    newHLines[y][x] = newHLines[y][x] === 'line' ? 'none' : 'line';
+    setGameState({ ...gameState, hLines: newHLines });
   };
 
   const handleHContextMenu = (e: React.MouseEvent, x: number, y: number) => {
     e.preventDefault();
-    const newLines = [...hLines];
-    newLines[y] = [...newLines[y]];
-    newLines[y][x] = newLines[y][x] === 'cross' ? 'none' : 'cross';
-    setHLines(newLines);
+    if (!gameState) return;
+    const newHLines = gameState.hLines.map(row => [...row]);
+    newHLines[y][x] = newHLines[y][x] === 'cross' ? 'none' : 'cross';
+    setGameState({ ...gameState, hLines: newHLines });
   };
 
   const handleVClick = (x: number, y: number) => {
-    const newLines = [...vLines];
-    newLines[y] = [...newLines[y]];
-    newLines[y][x] = newLines[y][x] === 'line' ? 'none' : 'line';
-    setVLines(newLines);
+    if (!gameState) return;
+    const newVLines = gameState.vLines.map(row => [...row]);
+    newVLines[y][x] = newVLines[y][x] === 'line' ? 'none' : 'line';
+    setGameState({ ...gameState, vLines: newVLines });
   };
 
   const handleVContextMenu = (e: React.MouseEvent, x: number, y: number) => {
     e.preventDefault();
-    const newLines = [...vLines];
-    newLines[y] = [...newLines[y]];
-    newLines[y][x] = newLines[y][x] === 'cross' ? 'none' : 'cross';
-    setVLines(newLines);
+    if (!gameState) return;
+    const newVLines = gameState.vLines.map(row => [...row]);
+    newVLines[y][x] = newVLines[y][x] === 'cross' ? 'none' : 'cross';
+    setGameState({ ...gameState, vLines: newVLines });
   };
 
   const toggleCellColor = (x: number, y: number) => {
-    const newColors = [...cellColors];
-    newColors[y] = [...newColors[y]];
-    newColors[y][x] = (newColors[y][x] + 1) % 3;
-    setCellColors(newColors);
+    if (!gameState) return;
+    const newColors = gameState.cellColors.map(row => [...row]);
+    newColors[y][x] = ((newColors[y][x] + 1) % 3) as CellColor;
+    setGameState({ ...gameState, cellColors: newColors });
   };
 
-  const isSatisfied = useCallback((x: number, y: number, num: number) => {
+  const handleHint = () => {
+    if (!gameState) return;
+    const newHLines = gameState.hLines.map(row => [...row]);
+    const newVLines = gameState.vLines.map(row => [...row]);
+
+    let changed = true;
+    while (changed) {
+      changed = false;
+
+      for (let y = 0; y < gameState.height; y++) {
+        for (let x = 0; x < gameState.width; x++) {
+          const num = gameState.puzzleData[y][x];
+
+          if (num === 0) {
+            if (newHLines[y][x] !== 'cross') { newHLines[y][x] = 'cross'; changed = true; }
+            if (newHLines[y + 1][x] !== 'cross') { newHLines[y + 1][x] = 'cross'; changed = true; }
+            if (newVLines[y][x] !== 'cross') { newVLines[y][x] = 'cross'; changed = true; }
+            if (newVLines[y][x + 1] !== 'cross') { newVLines[y][x + 1] = 'cross'; changed = true; }
+          } else if (num !== null) {
+            const edges = [
+              { type: 'h', r: y, c: x, state: newHLines[y][x] },
+              { type: 'h', r: y + 1, c: x, state: newHLines[y + 1][x] },
+              { type: 'v', r: y, c: x, state: newVLines[y][x] },
+              { type: 'v', r: y, c: x + 1, state: newVLines[y][x + 1] }
+            ];
+
+            const crossCount = edges.filter(e => e.state === 'cross').length;
+            const lineCount = edges.filter(e => e.state === 'line').length;
+
+            if (4 - crossCount === num) {
+              for (const e of edges) {
+                if (e.state !== 'cross' && e.state !== 'line') {
+                  if (e.type === 'h') newHLines[e.r][e.c] = 'line';
+                  if (e.type === 'v') newVLines[e.r][e.c] = 'line';
+                  changed = true;
+                }
+              }
+            }
+
+            if (lineCount === num) {
+              for (const e of edges) {
+                if (e.state !== 'cross' && e.state !== 'line') {
+                  if (e.type === 'h') newHLines[e.r][e.c] = 'cross';
+                  if (e.type === 'v') newVLines[e.r][e.c] = 'cross';
+                  changed = true;
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    setGameState({ ...gameState, hLines: newHLines, vLines: newVLines });
+  };
+
+  const isSatisfied = useCallback((x: number, y: number, num: number, hL: EdgeState[][], vL: EdgeState[][]) => {
     let count = 0;
-    if (hLines[y][x] === 'line') count++;
-    if (hLines[y + 1][x] === 'line') count++;
-    if (vLines[y][x] === 'line') count++;
-    if (vLines[y][x + 1] === 'line') count++;
+    if (hL[y][x] === 'line') count++;
+    if (hL[y + 1][x] === 'line') count++;
+    if (vL[y][x] === 'line') count++;
+    if (vL[y][x + 1] === 'line') count++;
     return count === num;
-  }, [hLines, vLines]);
+  }, []);
 
   useEffect(() => {
+    if (!gameState) return;
+
     // 1. すべての数字が条件を満たしているかチェック
-    for (let y = 0; y < GRID_SIZE; y++) {
-      for (let x = 0; x < GRID_SIZE; x++) {
-        const num = puzzleData[y][x];
+    for (let y = 0; y < gameState.height; y++) {
+      for (let x = 0; x < gameState.width; x++) {
+        const num = gameState.puzzleData[y][x];
         if (num !== null) {
-          if (!isSatisfied(x, y, num)) return;
+          if (!isSatisfied(x, y, num, gameState.hLines, gameState.vLines)) return;
         }
       }
     }
@@ -103,29 +184,29 @@ export default function Home() {
     let startNode: string | null = null;
     const adj = new Map<string, string[]>();
 
-    for (let y = 0; y <= GRID_SIZE; y++) {
-      for (let x = 0; x <= GRID_SIZE; x++) {
+    for (let y = 0; y <= gameState.height; y++) {
+      for (let x = 0; x <= gameState.width; x++) {
         let degree = 0;
         const neighbors: string[] = [];
         const nodeId = `${x},${y}`;
 
         // 上の辺
-        if (y > 0 && vLines[y - 1][x] === 'line') {
+        if (y > 0 && gameState.vLines[y - 1][x] === 'line') {
           degree++;
           neighbors.push(`${x},${y - 1}`);
         }
         // 下の辺
-        if (y < GRID_SIZE && vLines[y][x] === 'line') {
+        if (y < gameState.height && gameState.vLines[y][x] === 'line') {
           degree++;
           neighbors.push(`${x},${y + 1}`);
         }
         // 左の辺
-        if (x > 0 && hLines[y][x - 1] === 'line') {
+        if (x > 0 && gameState.hLines[y][x - 1] === 'line') {
           degree++;
           neighbors.push(`${x - 1},${y}`);
         }
         // 右の辺
-        if (x < GRID_SIZE && hLines[y][x] === 'line') {
+        if (x < gameState.width && gameState.hLines[y][x] === 'line') {
           degree++;
           neighbors.push(`${x + 1},${y}`);
         }
@@ -160,7 +241,11 @@ export default function Home() {
     if (visited.size === adj.size) {
       setTimeout(() => alert('正解！'), 50);
     }
-  }, [hLines, vLines, isSatisfied]);
+  }, [gameState, isSatisfied]);
+
+  if (!gameState) {
+    return <div className="flex min-h-screen items-center justify-center">Loading...</div>;
+  }
 
   return (
     <main className="flex min-h-screen flex-col items-center justify-center bg-white p-24">
@@ -168,17 +253,17 @@ export default function Home() {
       <div 
         className="relative" 
         style={{ 
-          width: GRID_SIZE * CELL_SIZE, 
-          height: GRID_SIZE * CELL_SIZE 
+          width: gameState.width * CELL_SIZE, 
+          height: gameState.height * CELL_SIZE 
         }}
       >
         {/* Cells with numbers */}
-        {puzzleData.map((row, y) =>
+        {gameState.puzzleData.map((row, y) =>
           row.map((num, x) => (
             <div
               key={`cell-${x}-${y}`}
               className={`absolute flex items-center justify-center text-black text-3xl font-medium cursor-pointer select-none transition-colors duration-200 ${
-                cellColors[y][x] === 1 ? 'bg-pink-100' : cellColors[y][x] === 2 ? 'bg-sky-100' : 'bg-transparent'
+                gameState.cellColors[y][x] === 1 ? 'bg-pink-100' : gameState.cellColors[y][x] === 2 ? 'bg-sky-100' : 'bg-transparent'
               }`}
               style={{
                 left: x * CELL_SIZE,
@@ -190,7 +275,7 @@ export default function Home() {
             >
               {num !== null && (
                 <>
-                  {isSatisfied(x, y, num) && (
+                  {isSatisfied(x, y, num, gameState.hLines, gameState.vLines) && (
                     <div className="absolute w-10 h-10 bg-red-200 rounded-full z-0 pointer-events-none" />
                   )}
                   <span className="relative z-10 select-none pointer-events-none">{num}</span>
@@ -201,8 +286,8 @@ export default function Home() {
         )}
 
         {/* Horizontal Edges */}
-        {Array.from({ length: GRID_SIZE + 1 }).map((_, y) =>
-          Array.from({ length: GRID_SIZE }).map((_, x) => (
+        {Array.from({ length: gameState.height + 1 }).map((_, y) =>
+          Array.from({ length: gameState.width }).map((_, x) => (
             <div
               key={`h-edge-${x}-${y}`}
               className="absolute flex items-center justify-center cursor-pointer group z-10"
@@ -215,16 +300,16 @@ export default function Home() {
               onClick={() => handleHClick(x, y)}
               onContextMenu={(e) => handleHContextMenu(e, x, y)}
             >
-              {hLines[y][x] === 'line' && (
+              {gameState.hLines[y][x] === 'line' && (
                 <div className="w-full h-1 bg-black transition-colors duration-200" />
               )}
-              {hLines[y][x] === 'cross' && (
+              {gameState.hLines[y][x] === 'cross' && (
                 <>
                   <div className="w-full h-0 border-t-2 border-dotted border-gray-400 absolute" />
                   <div className="text-gray-500 font-bold text-xs absolute z-20 select-none">×</div>
                 </>
               )}
-              {hLines[y][x] === 'none' && (
+              {gameState.hLines[y][x] === 'none' && (
                 <div className="w-full h-1 bg-transparent group-hover:bg-gray-300 transition-colors duration-200" />
               )}
             </div>
@@ -232,8 +317,8 @@ export default function Home() {
         )}
 
         {/* Vertical Edges */}
-        {Array.from({ length: GRID_SIZE }).map((_, y) =>
-          Array.from({ length: GRID_SIZE + 1 }).map((_, x) => (
+        {Array.from({ length: gameState.height }).map((_, y) =>
+          Array.from({ length: gameState.width + 1 }).map((_, x) => (
             <div
               key={`v-edge-${x}-${y}`}
               className="absolute flex items-center justify-center cursor-pointer group z-10"
@@ -246,16 +331,16 @@ export default function Home() {
               onClick={() => handleVClick(x, y)}
               onContextMenu={(e) => handleVContextMenu(e, x, y)}
             >
-              {vLines[y][x] === 'line' && (
+              {gameState.vLines[y][x] === 'line' && (
                 <div className="w-1 h-full bg-black transition-colors duration-200" />
               )}
-              {vLines[y][x] === 'cross' && (
+              {gameState.vLines[y][x] === 'cross' && (
                 <>
                   <div className="h-full w-0 border-l-2 border-dotted border-gray-400 absolute" />
                   <div className="text-gray-500 font-bold text-xs absolute z-20 select-none">×</div>
                 </>
               )}
-              {vLines[y][x] === 'none' && (
+              {gameState.vLines[y][x] === 'none' && (
                 <div className="w-1 h-full bg-transparent group-hover:bg-gray-300 transition-colors duration-200" />
               )}
             </div>
@@ -263,8 +348,8 @@ export default function Home() {
         )}
 
         {/* Dots */}
-        {Array.from({ length: GRID_SIZE + 1 }).map((_, y) =>
-          Array.from({ length: GRID_SIZE + 1 }).map((_, x) => (
+        {Array.from({ length: gameState.height + 1 }).map((_, y) =>
+          Array.from({ length: gameState.width + 1 }).map((_, x) => (
             <div
               key={`dot-${x}-${y}`}
               className="absolute bg-black rounded-full transform -translate-x-1/2 -translate-y-1/2"
@@ -279,6 +364,20 @@ export default function Home() {
           ))
         )}
       </div>
+      <button
+        onClick={handleHint}
+        className="mt-12 px-6 py-3 bg-indigo-500 text-white font-bold rounded shadow hover:bg-indigo-600 transition-colors"
+      >
+        ヒント
+      </button>
     </main>
+  );
+}
+
+export default function Home() {
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <ProblemContent />
+    </Suspense>
   );
 }
