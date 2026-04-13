@@ -14,10 +14,128 @@ export function isSatisfied(x: number, y: number, num: number, hLines: EdgeState
 
 
 
+function hasContradiction(state: GameState): boolean {
+  // 1. セルの数字と線の矛盾チェック
+  for (let y = 0; y < state.height; y++) {
+    for (let x = 0; x < state.width; x++) {
+      const num = state.puzzleData[y][x];
+      if (num !== null) {
+        let lines = 0, crosses = 0;
+        if (state.hLines[y][x] === 'line') lines++; else if (state.hLines[y][x] === 'cross') crosses++;
+        if (state.hLines[y + 1][x] === 'line') lines++; else if (state.hLines[y + 1][x] === 'cross') crosses++;
+        if (state.vLines[y][x] === 'line') lines++; else if (state.vLines[y][x] === 'cross') crosses++;
+        if (state.vLines[y][x + 1] === 'line') lines++; else if (state.vLines[y][x + 1] === 'cross') crosses++;
+        
+        if (lines > num) return true; // 実線が多すぎる
+        if (4 - crosses < num) return true; // 実線を引ける余地が足りない
+      }
+    }
+  }
+
+  // 2. ドット（頂点）の線の数の矛盾チェック
+  const adj = new Map<string, string[]>();
+  for (let y = 0; y <= state.height; y++) {
+    for (let x = 0; x <= state.width; x++) {
+      adj.set(`${x},${y}`, []);
+    }
+  }
+  let totalLines = 0;
+  for (let y = 0; y <= state.height; y++) {
+    for (let x = 0; x < state.width; x++) {
+      if (state.hLines[y][x] === 'line') {
+        adj.get(`${x},${y}`)!.push(`${x + 1},${y}`);
+        adj.get(`${x + 1},${y}`)!.push(`${x},${y}`);
+        totalLines++;
+      }
+    }
+  }
+  for (let y = 0; y < state.height; y++) {
+    for (let x = 0; x <= state.width; x++) {
+      if (state.vLines[y][x] === 'line') {
+        adj.get(`${x},${y}`)!.push(`${x},${y + 1}`);
+        adj.get(`${x},${y + 1}`)!.push(`${x},${y}`);
+        totalLines++;
+      }
+    }
+  }
+
+  for (let y = 0; y <= state.height; y++) {
+    for (let x = 0; x <= state.width; x++) {
+      const neighbors = adj.get(`${x},${y}`)!;
+      if (neighbors.length > 2) return true; // 分岐（3本以上の線が交差）
+      
+      if (neighbors.length === 1) {
+        let noneCount = 0;
+        if (y > 0 && state.vLines[y - 1][x] === 'none') noneCount++;
+        if (y < state.height && state.vLines[y][x] === 'none') noneCount++;
+        if (x > 0 && state.hLines[y][x - 1] === 'none') noneCount++;
+        if (x < state.width && state.hLines[y][x] === 'none') noneCount++;
+        if (noneCount === 0) return true; // 行き止まり（もう線を伸ばせない）
+      }
+    }
+  }
+
+  // 3. ループの完成チェック（小さなループができていないか）
+  const visited = new Set<string>();
+  for (let y = 0; y <= state.height; y++) {
+    for (let x = 0; x <= state.width; x++) {
+      const startNode = `${x},${y}`;
+      if (!visited.has(startNode) && adj.get(startNode)!.length > 0) {
+        let isLoop = false;
+        const q = [{ node: startNode, parent: null as string | null }];
+        const compVisited = new Set<string>();
+        compVisited.add(startNode);
+        
+        while (q.length > 0) {
+          const { node, parent } = q.shift()!;
+          visited.add(node);
+          for (const neighbor of adj.get(node)!) {
+            if (neighbor === parent) continue;
+            if (compVisited.has(neighbor)) {
+              isLoop = true;
+            } else {
+              compVisited.add(neighbor);
+              q.push({ node: neighbor, parent: node });
+            }
+          }
+        }
+
+        if (isLoop) {
+          // ループが完成している場合、他に実線があれば矛盾
+          if (compVisited.size < totalLines) return true; 
+          
+          // すべての数字が満たされているか
+          let allSatisfied = true;
+          for (let cy = 0; cy < state.height; cy++) {
+            for (let cx = 0; cx < state.width; cx++) {
+              const num = state.puzzleData[cy][cx];
+              if (num !== null) {
+                let count = 0;
+                if (state.hLines[cy][cx] === 'line') count++;
+                if (state.hLines[cy + 1][cx] === 'line') count++;
+                if (state.vLines[cy][cx] === 'line') count++;
+                if (state.vLines[cy][cx + 1] === 'line') count++;
+                if (count !== num) {
+                  allSatisfied = false;
+                  break;
+                }
+              }
+            }
+            if (!allSatisfied) break;
+          }
+          if (!allSatisfied) return true; 
+        }
+      }
+    }
+  }
+
+  return false;
+}
+
 /**
- * ヒント機能：確定できる実線やバツを推論して新しいGameStateを返す
+ * 基本的な推論ロジック（仮定法を含まない）
  */
-export function applySuperHint(gameState: GameState): GameState {
+function applyBasicDeductions(gameState: GameState): GameState {
   let currentState = gameState;
   let changed = true;
 
@@ -137,11 +255,25 @@ export function applySuperHint(gameState: GameState): GameState {
       }
     }
 
-    // 5. '3' のセルからの線の伸びに関するルール
+    // 5. '3' のセルに関するルール（隣接・線の伸び）
     for (let y = 0; y < currentState.height; y++) {
       for (let x = 0; x < currentState.width; x++) {
         if (currentState.puzzleData[y][x] === 3) {
-          // Top-Left (A)
+          // 隣接する '3' がある場合のルール
+          // 横に隣接
+          if (x < currentState.width - 1 && currentState.puzzleData[y][x + 1] === 3) {
+            if (newVLines[y][x] !== 'line') { newVLines[y][x] = 'line'; dotChanged = true; } // 左辺
+            if (newVLines[y][x + 1] !== 'line') { newVLines[y][x + 1] = 'line'; dotChanged = true; } // 共有する中辺
+            if (newVLines[y][x + 2] !== 'line') { newVLines[y][x + 2] = 'line'; dotChanged = true; } // 右辺
+          }
+          // 縦に隣接
+          if (y < currentState.height - 1 && currentState.puzzleData[y + 1][x] === 3) {
+            if (newHLines[y][x] !== 'line') { newHLines[y][x] = 'line'; dotChanged = true; } // 上辺
+            if (newHLines[y + 1][x] !== 'line') { newHLines[y + 1][x] = 'line'; dotChanged = true; } // 共有する中辺
+            if (newHLines[y + 2][x] !== 'line') { newHLines[y + 2][x] = 'line'; dotChanged = true; } // 下辺
+          }
+
+          // Top-Left (A)からの伸び
           const tlOut1 = y > 0 ? newVLines[y - 1][x] : 'none';
           const tlOut2 = x > 0 ? newHLines[y][x - 1] : 'none';
           if (tlOut1 === 'line' || tlOut2 === 'line') {
@@ -311,6 +443,83 @@ export function applySuperHint(gameState: GameState): GameState {
         vLines: newVLines
       };
       changed = true;
+    }
+  }
+
+  return currentState;
+}
+
+/**
+ * 強力なヒント機能：確定できる実線やバツを推論して新しいGameStateを返す。
+ * 仮定法（背理法）を用いて、ある辺に実線を引いたときに矛盾が生じるならバツを引く。
+ */
+export function applySuperHint(gameState: GameState): GameState {
+  let currentState = gameState;
+  let changed = true;
+
+  while (changed) {
+    changed = false;
+
+    // 基本的な推論を限界まで適用
+    const nextState = applyBasicDeductions(currentState);
+    if (
+      JSON.stringify(currentState.hLines) !== JSON.stringify(nextState.hLines) ||
+      JSON.stringify(currentState.vLines) !== JSON.stringify(nextState.vLines)
+    ) {
+      currentState = nextState;
+      changed = true;
+    }
+
+    // 基本推論で進展がなかった場合、背理法を適用する
+    if (!changed) {
+      const newHLines = currentState.hLines.map(row => [...row]);
+      const newVLines = currentState.vLines.map(row => [...row]);
+      let hypoChanged = false;
+
+      for (let y = 0; y <= currentState.height; y++) {
+        for (let x = 0; x < currentState.width; x++) {
+          if (newHLines[y][x] === 'none') {
+            const testState = {
+              ...currentState,
+              hLines: newHLines.map(row => [...row]),
+              vLines: newVLines.map(row => [...row])
+            };
+            testState.hLines[y][x] = 'line';
+            const resultState = applyBasicDeductions(testState);
+            if (hasContradiction(resultState)) {
+              newHLines[y][x] = 'cross';
+              hypoChanged = true;
+            }
+          }
+        }
+      }
+
+      for (let y = 0; y < currentState.height; y++) {
+        for (let x = 0; x <= currentState.width; x++) {
+          if (newVLines[y][x] === 'none') {
+            const testState = {
+              ...currentState,
+              hLines: newHLines.map(row => [...row]),
+              vLines: newVLines.map(row => [...row])
+            };
+            testState.vLines[y][x] = 'line';
+            const resultState = applyBasicDeductions(testState);
+            if (hasContradiction(resultState)) {
+              newVLines[y][x] = 'cross';
+              hypoChanged = true;
+            }
+          }
+        }
+      }
+
+      if (hypoChanged) {
+        currentState = {
+          ...currentState,
+          hLines: newHLines,
+          vLines: newVLines
+        };
+        changed = true;
+      }
     }
   }
 
