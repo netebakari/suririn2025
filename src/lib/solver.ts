@@ -1,0 +1,328 @@
+import { GameState, EdgeState, CellNumber } from '@/types/game';
+
+/**
+ * 指定したセルの数字の条件を満たしているかチェックする
+ */
+export function isSatisfied(x: number, y: number, num: number, hLines: EdgeState[][], vLines: EdgeState[][]): boolean {
+  let count = 0;
+  if (hLines[y][x] === 'line') count++;
+  if (hLines[y + 1][x] === 'line') count++;
+  if (vLines[y][x] === 'line') count++;
+  if (vLines[y][x + 1] === 'line') count++;
+  return count === num;
+}
+
+
+
+/**
+ * ヒント機能：確定できる実線やバツを推論して新しいGameStateを返す
+ */
+export function applySuperHint(gameState: GameState): GameState {
+  let currentState = gameState;
+  let changed = true;
+
+  while (changed) {
+    changed = false;
+
+    // 1. applyHint を呼び出す
+    const nextState = applyHint(currentState);
+
+    // 変更があったかどうかのチェック (文字列比較で簡易的に判定)
+    if (
+      JSON.stringify(currentState.hLines) !== JSON.stringify(nextState.hLines) ||
+      JSON.stringify(currentState.vLines) !== JSON.stringify(nextState.vLines)
+    ) {
+      changed = true;
+    }
+
+    currentState = nextState;
+
+    // 2. 点（ドット）のチェック
+    const newHLines = currentState.hLines.map(row => [...row]);
+    const newVLines = currentState.vLines.map(row => [...row]);
+    let dotChanged = false;
+
+    for (let y = 0; y <= currentState.height; y++) {
+      for (let x = 0; x <= currentState.width; x++) {
+        const connectedEdges: { type: 'h' | 'v'; r: number; c: number; state: EdgeState }[] = [];
+
+        // 上の辺
+        if (y > 0) connectedEdges.push({ type: 'v', r: y - 1, c: x, state: newVLines[y - 1][x] });
+        // 下の辺
+        if (y < currentState.height) connectedEdges.push({ type: 'v', r: y, c: x, state: newVLines[y][x] });
+        // 左の辺
+        if (x > 0) connectedEdges.push({ type: 'h', r: y, c: x - 1, state: newHLines[y][x - 1] });
+        // 右の辺
+        if (x < currentState.width) connectedEdges.push({ type: 'h', r: y, c: x, state: newHLines[y][x] });
+
+        const lineCount = connectedEdges.filter(e => e.state === 'line').length;
+        const crossCount = connectedEdges.filter(e => e.state === 'cross').length;
+        const totalEdges = connectedEdges.length;
+
+        // 2方向に実線が伸びている場合、残る方向にはクロスを引く
+        if (lineCount === 2) {
+          for (const e of connectedEdges) {
+            if (e.state === 'none') {
+              if (e.type === 'h') newHLines[e.r][e.c] = 'cross';
+              if (e.type === 'v') newVLines[e.r][e.c] = 'cross';
+              dotChanged = true;
+            }
+          }
+        }
+
+        // ある点から見て、1方向に実線が引かれていて、残りの方向のうち1つを除いてクロス線が引かれている場合、残る1方向に実線を引く
+        if (lineCount === 1 && crossCount === totalEdges - 2) {
+          for (const e of connectedEdges) {
+            if (e.state === 'none') {
+              if (e.type === 'h') newHLines[e.r][e.c] = 'line';
+              if (e.type === 'v') newVLines[e.r][e.c] = 'line';
+              dotChanged = true;
+            }
+          }
+        }
+
+        // ある点から見て、すべての方向のうち1つを除いてクロス線が引かれている場合、残る1方向には実線を引けないためクロスを引く
+        if (lineCount === 0 && crossCount === totalEdges - 1) {
+          for (const e of connectedEdges) {
+            if (e.state === 'none') {
+              if (e.type === 'h') newHLines[e.r][e.c] = 'cross';
+              if (e.type === 'v') newVLines[e.r][e.c] = 'cross';
+              dotChanged = true;
+            }
+          }
+        }
+      }
+    }
+
+    // 3. '0' と '1' が斜めに配置されている場合のチェック
+    for (let y = 1; y < currentState.height; y++) {
+      for (let x = 1; x < currentState.width; x++) {
+        const tl = currentState.puzzleData[y - 1][x - 1];
+        const tr = currentState.puzzleData[y - 1][x];
+        const bl = currentState.puzzleData[y][x - 1];
+        const br = currentState.puzzleData[y][x];
+
+        const is01 = (a: CellNumber, b: CellNumber) => (a === 0 && b === 1) || (a === 1 && b === 0);
+
+        if (is01(tl, br) || is01(tr, bl)) {
+          if (newHLines[y][x - 1] !== 'cross') { newHLines[y][x - 1] = 'cross'; dotChanged = true; }
+          if (newHLines[y][x] !== 'cross') { newHLines[y][x] = 'cross'; dotChanged = true; }
+          if (newVLines[y - 1][x] !== 'cross') { newVLines[y - 1][x] = 'cross'; dotChanged = true; }
+          if (newVLines[y][x] !== 'cross') { newVLines[y][x] = 'cross'; dotChanged = true; }
+        }
+      }
+    }
+
+    // 4. '3' が斜めに配置されている場合のチェック
+    for (let y = 1; y < currentState.height; y++) {
+      for (let x = 1; x < currentState.width; x++) {
+        const tl = currentState.puzzleData[y - 1][x - 1];
+        const tr = currentState.puzzleData[y - 1][x];
+        const bl = currentState.puzzleData[y][x - 1];
+        const br = currentState.puzzleData[y][x];
+
+        if (tl === 3 && br === 3) {
+          if (newHLines[y - 1][x - 1] !== 'line') { newHLines[y - 1][x - 1] = 'line'; dotChanged = true; } // tl の上
+          if (newVLines[y - 1][x - 1] !== 'line') { newVLines[y - 1][x - 1] = 'line'; dotChanged = true; } // tl の左
+          if (newHLines[y + 1][x] !== 'line') { newHLines[y + 1][x] = 'line'; dotChanged = true; } // br の下
+          if (newVLines[y][x + 1] !== 'line') { newVLines[y][x + 1] = 'line'; dotChanged = true; } // br の右
+        }
+
+        if (tr === 3 && bl === 3) {
+          if (newHLines[y - 1][x] !== 'line') { newHLines[y - 1][x] = 'line'; dotChanged = true; } // tr の上
+          if (newVLines[y - 1][x + 1] !== 'line') { newVLines[y - 1][x + 1] = 'line'; dotChanged = true; } // tr の右
+          if (newHLines[y + 1][x - 1] !== 'line') { newHLines[y + 1][x - 1] = 'line'; dotChanged = true; } // bl の下
+          if (newVLines[y][x - 1] !== 'line') { newVLines[y][x - 1] = 'line'; dotChanged = true; } // bl の左
+        }
+      }
+    }
+
+    // 5. '3' のセルからの線の伸びに関するルール
+    for (let y = 0; y < currentState.height; y++) {
+      for (let x = 0; x < currentState.width; x++) {
+        if (currentState.puzzleData[y][x] === 3) {
+          // Top-Left (A)
+          const tlOut1 = y > 0 ? newVLines[y - 1][x] : 'none';
+          const tlOut2 = x > 0 ? newHLines[y][x - 1] : 'none';
+          if (tlOut1 === 'line' || tlOut2 === 'line') {
+            if (newHLines[y + 1][x] !== 'line') { newHLines[y + 1][x] = 'line'; dotChanged = true; }
+            if (newVLines[y][x + 1] !== 'line') { newVLines[y][x + 1] = 'line'; dotChanged = true; }
+          }
+
+          // Top-Right (B)
+          const trOut1 = y > 0 ? newVLines[y - 1][x + 1] : 'none';
+          const trOut2 = x < currentState.width - 1 ? newHLines[y][x + 1] : 'none';
+          if (trOut1 === 'line' || trOut2 === 'line') {
+            if (newHLines[y + 1][x] !== 'line') { newHLines[y + 1][x] = 'line'; dotChanged = true; }
+            if (newVLines[y][x] !== 'line') { newVLines[y][x] = 'line'; dotChanged = true; }
+          }
+
+          // Bottom-Right (C)
+          const brOut1 = y < currentState.height - 1 ? newVLines[y + 1][x + 1] : 'none';
+          const brOut2 = x < currentState.width - 1 ? newHLines[y + 1][x + 1] : 'none';
+          if (brOut1 === 'line' || brOut2 === 'line') {
+            if (newHLines[y][x] !== 'line') { newHLines[y][x] = 'line'; dotChanged = true; }
+            if (newVLines[y][x] !== 'line') { newVLines[y][x] = 'line'; dotChanged = true; }
+          }
+
+          // Bottom-Left (D)
+          const blOut1 = y < currentState.height - 1 ? newVLines[y + 1][x] : 'none';
+          const blOut2 = x > 0 ? newHLines[y + 1][x - 1] : 'none';
+          if (blOut1 === 'line' || blOut2 === 'line') {
+            if (newHLines[y][x] !== 'line') { newHLines[y][x] = 'line'; dotChanged = true; }
+            if (newVLines[y][x + 1] !== 'line') { newVLines[y][x + 1] = 'line'; dotChanged = true; }
+          }
+        }
+      }
+    }
+
+    if (dotChanged) {
+      currentState = {
+        ...currentState,
+        hLines: newHLines,
+        vLines: newVLines
+      };
+      changed = true;
+    }
+  }
+
+  return currentState;
+}
+
+/**
+ * ヒント機能：確定できる実線やバツを推論して新しいGameStateを返す
+ */
+export function applyHint(gameState: GameState): GameState {
+  const newHLines = gameState.hLines.map(row => [...row]);
+  const newVLines = gameState.vLines.map(row => [...row]);
+
+  let changed = true;
+  while (changed) {
+    changed = false;
+
+    for (let y = 0; y < gameState.height; y++) {
+      for (let x = 0; x < gameState.width; x++) {
+        const num = gameState.puzzleData[y][x];
+
+        if (num === 0) {
+          if (newHLines[y][x] !== 'cross') { newHLines[y][x] = 'cross'; changed = true; }
+          if (newHLines[y + 1][x] !== 'cross') { newHLines[y + 1][x] = 'cross'; changed = true; }
+          if (newVLines[y][x] !== 'cross') { newVLines[y][x] = 'cross'; changed = true; }
+          if (newVLines[y][x + 1] !== 'cross') { newVLines[y][x + 1] = 'cross'; changed = true; }
+        } else if (num !== null) {
+          const edges = [
+            { type: 'h', r: y, c: x, state: newHLines[y][x] },
+            { type: 'h', r: y + 1, c: x, state: newHLines[y + 1][x] },
+            { type: 'v', r: y, c: x, state: newVLines[y][x] },
+            { type: 'v', r: y, c: x + 1, state: newVLines[y][x + 1] }
+          ];
+
+          const crossCount = edges.filter(e => e.state === 'cross').length;
+          const lineCount = edges.filter(e => e.state === 'line').length;
+
+          if (4 - crossCount === num) {
+            for (const e of edges) {
+              if (e.state !== 'cross' && e.state !== 'line') {
+                if (e.type === 'h') newHLines[e.r][e.c] = 'line';
+                if (e.type === 'v') newVLines[e.r][e.c] = 'line';
+                changed = true;
+              }
+            }
+          }
+
+          if (lineCount === num) {
+            for (const e of edges) {
+              if (e.state !== 'cross' && e.state !== 'line') {
+                if (e.type === 'h') newHLines[e.r][e.c] = 'cross';
+                if (e.type === 'v') newVLines[e.r][e.c] = 'cross';
+                changed = true;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return {
+    ...gameState,
+    hLines: newHLines,
+    vLines: newVLines
+  };
+}
+
+/**
+ * 現在の状態が正解であるかどうかを判定する
+ */
+export function isPuzzleSolved(gameState: GameState): boolean {
+  // 1. すべての数字が条件を満たしているかチェック
+  for (let y = 0; y < gameState.height; y++) {
+    for (let x = 0; x < gameState.width; x++) {
+      const num = gameState.puzzleData[y][x];
+      if (num !== null) {
+        if (!isSatisfied(x, y, num, gameState.hLines, gameState.vLines)) return false;
+      }
+    }
+  }
+
+  // 2. 実線が1つの輪っかになっているかチェック（枝分かれ、途切れなし）
+  let hasEdges = false;
+  let startNode: string | null = null;
+  const adj = new Map<string, string[]>();
+
+  for (let y = 0; y <= gameState.height; y++) {
+    for (let x = 0; x <= gameState.width; x++) {
+      let degree = 0;
+      const neighbors: string[] = [];
+      const nodeId = `${x},${y}`;
+
+      // 上の辺
+      if (y > 0 && gameState.vLines[y - 1][x] === 'line') {
+        degree++;
+        neighbors.push(`${x},${y - 1}`);
+      }
+      // 下の辺
+      if (y < gameState.height && gameState.vLines[y][x] === 'line') {
+        degree++;
+        neighbors.push(`${x},${y + 1}`);
+      }
+      // 左の辺
+      if (x > 0 && gameState.hLines[y][x - 1] === 'line') {
+        degree++;
+        neighbors.push(`${x - 1},${y}`);
+      }
+      // 右の辺
+      if (x < gameState.width && gameState.hLines[y][x] === 'line') {
+        degree++;
+        neighbors.push(`${x + 1},${y}`);
+      }
+
+      if (degree > 0) {
+        if (degree !== 2) return false; // 枝分かれまたは途切れがある
+        hasEdges = true;
+        startNode = nodeId;
+        adj.set(nodeId, neighbors);
+      }
+    }
+  }
+
+  if (!hasEdges || !startNode) return false;
+
+  // 連結成分が1つか（1つの輪っかか）どうかをチェック
+  const visited = new Set<string>();
+  const queue = [startNode];
+  visited.add(startNode);
+
+  while (queue.length > 0) {
+    const curr = queue.shift()!;
+    for (const neighbor of adj.get(curr) || []) {
+      if (!visited.has(neighbor)) {
+        visited.add(neighbor);
+        queue.push(neighbor);
+      }
+    }
+  }
+
+  // 全ての線が含まれるノードを訪問できていれば、1つの輪っかである
+  return visited.size === adj.size;
+}

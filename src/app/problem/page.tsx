@@ -4,6 +4,7 @@ import React, { useState, useEffect, useCallback, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { BASE64URL, decodeData } from '@/lib/util';
 import { GameState, CellNumber, EdgeState, CellColor } from '@/types/game';
+import { isSatisfied, isPuzzleSolved, applyHint, applySuperHint } from '@/lib/solver';
 
 function ProblemContent() {
   const searchParams = useSearchParams();
@@ -18,16 +19,12 @@ function ProblemContent() {
     let isDataValid = false;
 
     if (dataParam && dataParam.length >= 2) {
-      gridWidth = BASE64URL.indexOf(dataParam[0]);
-      gridHeight = BASE64URL.indexOf(dataParam[1]);
-      if (gridWidth <= 0) gridWidth = 8;
-      if (gridHeight <= 0) gridHeight = 8;
-      
-      const expectedDataLength = Math.ceil((gridWidth * gridHeight) / 2);
-      if (dataParam.length - 2 === expectedDataLength) {
+      try {
+        decodedData = decodeData(dataParam);
+        gridWidth = decodedData[0].length;
+        gridHeight = decodedData.length;
         isDataValid = true;
-        decodedData = decodeData(dataParam.substring(2), gridWidth, gridHeight);
-      } else {
+      } catch (e) {
         alert('データが間違っています');
       }
     }
@@ -103,145 +100,21 @@ function ProblemContent() {
 
   const handleHint = () => {
     if (!gameState) return;
-    const newHLines = gameState.hLines.map(row => [...row]);
-    const newVLines = gameState.vLines.map(row => [...row]);
-
-    let changed = true;
-    while (changed) {
-      changed = false;
-
-      for (let y = 0; y < gameState.height; y++) {
-        for (let x = 0; x < gameState.width; x++) {
-          const num = gameState.puzzleData[y][x];
-
-          if (num === 0) {
-            if (newHLines[y][x] !== 'cross') { newHLines[y][x] = 'cross'; changed = true; }
-            if (newHLines[y + 1][x] !== 'cross') { newHLines[y + 1][x] = 'cross'; changed = true; }
-            if (newVLines[y][x] !== 'cross') { newVLines[y][x] = 'cross'; changed = true; }
-            if (newVLines[y][x + 1] !== 'cross') { newVLines[y][x + 1] = 'cross'; changed = true; }
-          } else if (num !== null) {
-            const edges = [
-              { type: 'h', r: y, c: x, state: newHLines[y][x] },
-              { type: 'h', r: y + 1, c: x, state: newHLines[y + 1][x] },
-              { type: 'v', r: y, c: x, state: newVLines[y][x] },
-              { type: 'v', r: y, c: x + 1, state: newVLines[y][x + 1] }
-            ];
-
-            const crossCount = edges.filter(e => e.state === 'cross').length;
-            const lineCount = edges.filter(e => e.state === 'line').length;
-
-            if (4 - crossCount === num) {
-              for (const e of edges) {
-                if (e.state !== 'cross' && e.state !== 'line') {
-                  if (e.type === 'h') newHLines[e.r][e.c] = 'line';
-                  if (e.type === 'v') newVLines[e.r][e.c] = 'line';
-                  changed = true;
-                }
-              }
-            }
-
-            if (lineCount === num) {
-              for (const e of edges) {
-                if (e.state !== 'cross' && e.state !== 'line') {
-                  if (e.type === 'h') newHLines[e.r][e.c] = 'cross';
-                  if (e.type === 'v') newVLines[e.r][e.c] = 'cross';
-                  changed = true;
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-
-    setGameState({ ...gameState, hLines: newHLines, vLines: newVLines });
+    setGameState(applyHint(gameState));
   };
 
-  const isSatisfied = useCallback((x: number, y: number, num: number, hL: EdgeState[][], vL: EdgeState[][]) => {
-    let count = 0;
-    if (hL[y][x] === 'line') count++;
-    if (hL[y + 1][x] === 'line') count++;
-    if (vL[y][x] === 'line') count++;
-    if (vL[y][x + 1] === 'line') count++;
-    return count === num;
-  }, []);
+  const handleSuperHint = () => {
+    if (!gameState) return;
+    setGameState(applySuperHint(gameState));
+  };
 
   useEffect(() => {
     if (!gameState) return;
 
-    // 1. すべての数字が条件を満たしているかチェック
-    for (let y = 0; y < gameState.height; y++) {
-      for (let x = 0; x < gameState.width; x++) {
-        const num = gameState.puzzleData[y][x];
-        if (num !== null) {
-          if (!isSatisfied(x, y, num, gameState.hLines, gameState.vLines)) return;
-        }
-      }
-    }
-
-    // 2. 実線が1つの輪っかになっているかチェック（枝分かれ、途切れなし）
-    let hasEdges = false;
-    let startNode: string | null = null;
-    const adj = new Map<string, string[]>();
-
-    for (let y = 0; y <= gameState.height; y++) {
-      for (let x = 0; x <= gameState.width; x++) {
-        let degree = 0;
-        const neighbors: string[] = [];
-        const nodeId = `${x},${y}`;
-
-        // 上の辺
-        if (y > 0 && gameState.vLines[y - 1][x] === 'line') {
-          degree++;
-          neighbors.push(`${x},${y - 1}`);
-        }
-        // 下の辺
-        if (y < gameState.height && gameState.vLines[y][x] === 'line') {
-          degree++;
-          neighbors.push(`${x},${y + 1}`);
-        }
-        // 左の辺
-        if (x > 0 && gameState.hLines[y][x - 1] === 'line') {
-          degree++;
-          neighbors.push(`${x - 1},${y}`);
-        }
-        // 右の辺
-        if (x < gameState.width && gameState.hLines[y][x] === 'line') {
-          degree++;
-          neighbors.push(`${x + 1},${y}`);
-        }
-
-        if (degree > 0) {
-          if (degree !== 2) return; // 枝分かれまたは途切れがある
-          hasEdges = true;
-          startNode = nodeId;
-          adj.set(nodeId, neighbors);
-        }
-      }
-    }
-
-    if (!hasEdges || !startNode) return;
-
-    // 連結成分が1つか（1つの輪っかか）どうかをチェック
-    const visited = new Set<string>();
-    const queue = [startNode];
-    visited.add(startNode);
-
-    while (queue.length > 0) {
-      const curr = queue.shift()!;
-      for (const neighbor of adj.get(curr) || []) {
-        if (!visited.has(neighbor)) {
-          visited.add(neighbor);
-          queue.push(neighbor);
-        }
-      }
-    }
-
-    // 全ての線が含まれるノードを訪問できていれば、1つの輪っかである
-    if (visited.size === adj.size) {
+    if (isPuzzleSolved(gameState)) {
       setTimeout(() => alert('正解！'), 50);
     }
-  }, [gameState, isSatisfied]);
+  }, [gameState]);
 
   if (!gameState) {
     return <div className="flex min-h-screen items-center justify-center">Loading...</div>;
@@ -364,12 +237,20 @@ function ProblemContent() {
           ))
         )}
       </div>
-      <button
-        onClick={handleHint}
-        className="mt-12 px-6 py-3 bg-indigo-500 text-white font-bold rounded shadow hover:bg-indigo-600 transition-colors"
-      >
-        ヒント
-      </button>
+      <div className="mt-12 flex gap-4">
+        <button
+          onClick={handleHint}
+          className="px-6 py-3 bg-indigo-500 text-white font-bold rounded shadow hover:bg-indigo-600 transition-colors"
+        >
+          ヒント
+        </button>
+        <button
+          onClick={handleSuperHint}
+          className="px-6 py-3 bg-purple-600 text-white font-bold rounded shadow hover:bg-purple-700 transition-colors"
+        >
+          強力なヒント
+        </button>
+      </div>
     </main>
   );
 }
