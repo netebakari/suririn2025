@@ -176,6 +176,134 @@ export function applySuperHint(gameState: GameState): GameState {
       }
     }
 
+    // 6. 小さなループ（全体を解決しないループ）の完成を防ぐルール
+    const adj = new Map<string, string[]>();
+    for (let y = 0; y <= currentState.height; y++) {
+      for (let x = 0; x <= currentState.width; x++) {
+        adj.set(`${x},${y}`, []);
+      }
+    }
+    for (let y = 0; y <= currentState.height; y++) {
+      for (let x = 0; x < currentState.width; x++) {
+        if (newHLines[y][x] === 'line') {
+          adj.get(`${x},${y}`)!.push(`${x + 1},${y}`);
+          adj.get(`${x + 1},${y}`)!.push(`${x},${y}`);
+        }
+      }
+    }
+    for (let y = 0; y < currentState.height; y++) {
+      for (let x = 0; x <= currentState.width; x++) {
+        if (newVLines[y][x] === 'line') {
+          adj.get(`${x},${y}`)!.push(`${x},${y + 1}`);
+          adj.get(`${x},${y + 1}`)!.push(`${x},${y}`);
+        }
+      }
+    }
+
+    const isConnected = (u: string, v: string) => {
+      const visited = new Set<string>();
+      const queue = [u];
+      visited.add(u);
+      while (queue.length > 0) {
+        const curr = queue.shift()!;
+        if (curr === v) return true;
+        for (const neighbor of adj.get(curr)!) {
+          if (!visited.has(neighbor)) {
+            visited.add(neighbor);
+            queue.push(neighbor);
+          }
+        }
+      }
+      return false;
+    };
+
+    const checkPuzzleSolvedWithTempLines = () => {
+      for (let cy = 0; cy < currentState.height; cy++) {
+        for (let cx = 0; cx < currentState.width; cx++) {
+          const num = currentState.puzzleData[cy][cx];
+          if (num !== null) {
+            let count = 0;
+            if (newHLines[cy][cx] === 'line') count++;
+            if (newHLines[cy + 1][cx] === 'line') count++;
+            if (newVLines[cy][cx] === 'line') count++;
+            if (newVLines[cy][cx + 1] === 'line') count++;
+            if (count !== num) return false;
+          }
+        }
+      }
+      let hasEdges = false;
+      let startNode: string | null = null;
+      const localAdj = new Map<string, string[]>();
+      for (let cy = 0; cy <= currentState.height; cy++) {
+        for (let cx = 0; cx <= currentState.width; cx++) {
+          let degree = 0;
+          const neighbors: string[] = [];
+          const nodeId = `${cx},${cy}`;
+          if (cy > 0 && newVLines[cy - 1][cx] === 'line') { degree++; neighbors.push(`${cx},${cy - 1}`); }
+          if (cy < currentState.height && newVLines[cy][cx] === 'line') { degree++; neighbors.push(`${cx},${cy + 1}`); }
+          if (cx > 0 && newHLines[cy][cx - 1] === 'line') { degree++; neighbors.push(`${cx - 1},${cy}`); }
+          if (cx < currentState.width && newHLines[cy][cx] === 'line') { degree++; neighbors.push(`${cx + 1},${cy}`); }
+          if (degree > 0) {
+            if (degree !== 2) return false;
+            hasEdges = true;
+            startNode = nodeId;
+            localAdj.set(nodeId, neighbors);
+          }
+        }
+      }
+      if (!hasEdges || !startNode) return false;
+      const visited = new Set<string>();
+      const queue = [startNode];
+      visited.add(startNode);
+      while (queue.length > 0) {
+        const curr = queue.shift()!;
+        for (const neighbor of localAdj.get(curr) || []) {
+          if (!visited.has(neighbor)) {
+            visited.add(neighbor);
+            queue.push(neighbor);
+          }
+        }
+      }
+      return visited.size === localAdj.size;
+    };
+
+    for (let y = 0; y <= currentState.height; y++) {
+      for (let x = 0; x < currentState.width; x++) {
+        if (newHLines[y][x] === 'none') {
+          if (isConnected(`${x},${y}`, `${x + 1},${y}`)) {
+            newHLines[y][x] = 'line';
+            const solved = checkPuzzleSolvedWithTempLines();
+            newHLines[y][x] = 'none';
+            if (!solved) {
+              newHLines[y][x] = 'cross';
+              dotChanged = true;
+            } else {
+              newHLines[y][x] = 'line';
+              dotChanged = true;
+            }
+          }
+        }
+      }
+    }
+    for (let y = 0; y < currentState.height; y++) {
+      for (let x = 0; x <= currentState.width; x++) {
+        if (newVLines[y][x] === 'none') {
+          if (isConnected(`${x},${y}`, `${x},${y + 1}`)) {
+            newVLines[y][x] = 'line';
+            const solved = checkPuzzleSolvedWithTempLines();
+            newVLines[y][x] = 'none';
+            if (!solved) {
+              newVLines[y][x] = 'cross';
+              dotChanged = true;
+            } else {
+              newVLines[y][x] = 'line';
+              dotChanged = true;
+            }
+          }
+        }
+      }
+    }
+
     if (dotChanged) {
       currentState = {
         ...currentState,
