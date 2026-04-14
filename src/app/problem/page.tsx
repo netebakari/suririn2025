@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { BASE64URL, decodeData } from '@/lib/util';
+import { BASE64URL, decodeData, encode } from '@/lib/util';
 import { GameState, CellNumber, EdgeState, CellColor } from '@/types/game';
 import { isSatisfied, isPuzzleSolved, applyHint, applySuperHint } from '@/lib/solver';
 
@@ -11,6 +11,7 @@ function ProblemContent() {
   const dataParam = searchParams.get('data');
 
   const [gameState, setGameState] = useState<GameState | null>(null);
+  const [jsonText, setJsonText] = useState<string>('');
 
   useEffect(() => {
     let gridWidth = 8;
@@ -109,6 +110,29 @@ function ProblemContent() {
   };
 
   useEffect(() => {
+    if (gameState) {
+      setJsonText(JSON.stringify(gameState, null, 2));
+    }
+  }, [gameState]);
+
+  const handleJsonUpdate = () => {
+    try {
+      const parsed = JSON.parse(jsonText);
+      setGameState(parsed);
+      
+      if (parsed && parsed.puzzleData) {
+        const formattedGrid = parsed.puzzleData.map((row: any[]) => 
+          row.map((cell: any) => cell === null ? '.' : cell.toString()).join('')
+        );
+        const encoded = encode(formattedGrid);
+        window.history.pushState(null, '', `/problem?data=${encoded}`);
+      }
+    } catch (e) {
+      alert("Invalid JSON");
+    }
+  };
+
+  useEffect(() => {
     if (!gameState) return;
 
     if (isPuzzleSolved(gameState)) {
@@ -122,7 +146,7 @@ function ProblemContent() {
 
   return (
     <main className="flex min-h-screen flex-col items-center justify-center bg-white p-24">
-      <h1 className="text-2xl font-bold mb-8 text-black">スリザーリンク サンプル問題</h1>
+      <h1 className="text-2xl font-bold mb-8 text-black">スリザーリンク ({gameState.width}x{gameState.height})</h1>
       <div 
         className="relative" 
         style={{ 
@@ -249,6 +273,21 @@ function ProblemContent() {
           className="px-6 py-3 bg-purple-600 text-white font-bold rounded shadow hover:bg-purple-700 transition-colors"
         >
           強力なヒント
+        </button>
+      </div>
+
+      <div className="mt-8 w-full max-w-4xl flex flex-col gap-4">
+        <h2 className="text-xl font-bold text-black">デバッグ用 GameState JSON</h2>
+        <textarea 
+          className="w-full h-64 p-4 border rounded text-sm font-mono text-black"
+          value={jsonText}
+          onChange={(e) => setJsonText(e.target.value)}
+        />
+        <button
+          onClick={handleJsonUpdate}
+          className="px-6 py-3 bg-green-600 text-white font-bold rounded shadow hover:bg-green-700 transition-colors self-start"
+        >
+          JSONを反映
         </button>
       </div>
     </main>

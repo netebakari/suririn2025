@@ -439,9 +439,6 @@ function applyBasicDeductions(gameState: GameState): GameState {
             if (!solved) {
               newHLines[y][x] = 'cross';
               dotChanged = true;
-            } else {
-              newHLines[y][x] = 'line';
-              dotChanged = true;
             }
           }
         }
@@ -456,9 +453,6 @@ function applyBasicDeductions(gameState: GameState): GameState {
             newVLines[y][x] = 'none';
             if (!solved) {
               newVLines[y][x] = 'cross';
-              dotChanged = true;
-            } else {
-              newVLines[y][x] = 'line';
               dotChanged = true;
             }
           }
@@ -530,6 +524,76 @@ function applyBasicDeductions(gameState: GameState): GameState {
           } else {
             newVLines[y][x] = 'line';
             dotChanged = true;
+          }
+        }
+      }
+    }
+
+    // 8. ループが完成し、すべての数字が満たされているなら、残りをクロスにする
+    let hasEdges = false;
+    let startNode: string | null = null;
+    let validDegrees = true;
+    const localAdj = new Map<string, string[]>();
+    for (let cy = 0; cy <= currentState.height; cy++) {
+      for (let cx = 0; cx <= currentState.width; cx++) {
+        let degree = 0;
+        const neighbors: string[] = [];
+        const nodeId = `${cx},${cy}`;
+        if (cy > 0 && newVLines[cy - 1][cx] === 'line') { degree++; neighbors.push(`${cx},${cy - 1}`); }
+        if (cy < currentState.height && newVLines[cy][cx] === 'line') { degree++; neighbors.push(`${cx},${cy + 1}`); }
+        if (cx > 0 && newHLines[cy][cx - 1] === 'line') { degree++; neighbors.push(`${cx - 1},${cy}`); }
+        if (cx < currentState.width && newHLines[cy][cx] === 'line') { degree++; neighbors.push(`${cx + 1},${cy}`); }
+        if (degree > 0) {
+          if (degree !== 2) { validDegrees = false; break; }
+          hasEdges = true;
+          startNode = nodeId;
+          localAdj.set(nodeId, neighbors);
+        }
+      }
+      if (!validDegrees) break;
+    }
+
+    if (hasEdges && startNode && validDegrees) {
+      const visited = new Set<string>();
+      const queue = [startNode];
+      visited.add(startNode);
+      while (queue.length > 0) {
+        const curr = queue.shift()!;
+        for (const neighbor of localAdj.get(curr) || []) {
+          if (!visited.has(neighbor)) {
+            visited.add(neighbor);
+            queue.push(neighbor);
+          }
+        }
+      }
+      
+      if (visited.size === localAdj.size) {
+        let allSatisfied = true;
+        for (let cy = 0; cy < currentState.height; cy++) {
+          for (let cx = 0; cx < currentState.width; cx++) {
+            const num = currentState.puzzleData[cy][cx];
+            if (num !== null) {
+              let count = 0;
+              if (newHLines[cy][cx] === 'line') count++;
+              if (newHLines[cy + 1][cx] === 'line') count++;
+              if (newVLines[cy][cx] === 'line') count++;
+              if (newVLines[cy][cx + 1] === 'line') count++;
+              if (count !== num) { allSatisfied = false; break; }
+            }
+          }
+          if (!allSatisfied) break;
+        }
+        
+        if (allSatisfied) {
+          for (let cy = 0; cy <= currentState.height; cy++) {
+            for (let cx = 0; cx < currentState.width; cx++) {
+              if (newHLines[cy][cx] === 'none') { newHLines[cy][cx] = 'cross'; dotChanged = true; }
+            }
+          }
+          for (let cy = 0; cy < currentState.height; cy++) {
+            for (let cx = 0; cx <= currentState.width; cx++) {
+              if (newVLines[cy][cx] === 'none') { newVLines[cy][cx] = 'cross'; dotChanged = true; }
+            }
           }
         }
       }
@@ -692,6 +756,18 @@ export function applyHint(gameState: GameState): GameState {
  * 現在の状態が正解であるかどうかを判定する
  */
 export function isPuzzleSolved(gameState: GameState): boolean {
+  // 0. 未確定の辺が残っていないかチェック
+  for (let y = 0; y <= gameState.height; y++) {
+    for (let x = 0; x < gameState.width; x++) {
+      if (gameState.hLines[y][x] === 'none') return false;
+    }
+  }
+  for (let y = 0; y < gameState.height; y++) {
+    for (let x = 0; x <= gameState.width; x++) {
+      if (gameState.vLines[y][x] === 'none') return false;
+    }
+  }
+
   // 1. すべての数字が条件を満たしているかチェック
   for (let y = 0; y < gameState.height; y++) {
     for (let x = 0; x < gameState.width; x++) {
