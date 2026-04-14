@@ -1,4 +1,4 @@
-import { GameState, EdgeState, CellNumber } from '@/types/game';
+import { GameState, EdgeState, CellNumber, CellColor } from '@/types/game';
 
 /**
  * 指定したセルの数字の条件を満たしているかチェックする
@@ -71,6 +71,35 @@ function hasContradiction(state: GameState): boolean {
         if (x > 0 && state.hLines[y][x - 1] === 'none') noneCount++;
         if (x < state.width && state.hLines[y][x] === 'none') noneCount++;
         if (noneCount === 0) return true; // 行き止まり（もう線を伸ばせない）
+      }
+    }
+  }
+
+  // 4. 色塗り（Inside/Outside）の矛盾チェック
+  const getColor = (cx: number, cy: number) => {
+    if (cx < 0 || cx >= state.width || cy < 0 || cy >= state.height) return 1 as CellColor;
+    return state.cellColors[cy][cx];
+  }
+
+  for (let y = 0; y <= state.height; y++) {
+    for (let x = 0; x < state.width; x++) {
+      const edge = state.hLines[y][x];
+      const c1 = getColor(x, y - 1);
+      const c2 = getColor(x, y);
+      if (c1 !== 0 && c2 !== 0) {
+        if (edge === 'line' && c1 === c2) return true;
+        if (edge === 'cross' && c1 !== c2) return true;
+      }
+    }
+  }
+  for (let y = 0; y < state.height; y++) {
+    for (let x = 0; x <= state.width; x++) {
+      const edge = state.vLines[y][x];
+      const c1 = getColor(x - 1, y);
+      const c2 = getColor(x, y);
+      if (c1 !== 0 && c2 !== 0) {
+        if (edge === 'line' && c1 === c2) return true;
+        if (edge === 'cross' && c1 !== c2) return true;
       }
     }
   }
@@ -158,6 +187,7 @@ function applyBasicDeductions(gameState: GameState): GameState {
     // 2. 点（ドット）のチェック
     const newHLines = currentState.hLines.map(row => [...row]);
     const newVLines = currentState.vLines.map(row => [...row]);
+    const newColors = currentState.cellColors.map(row => [...row]);
     let dotChanged = false;
 
     for (let y = 0; y <= currentState.height; y++) {
@@ -436,11 +466,81 @@ function applyBasicDeductions(gameState: GameState): GameState {
       }
     }
 
+    // 7. In/Out (色塗り) ロジック
+    const getCellColor = (cx: number, cy: number) => {
+      if (cx < 0 || cx >= currentState.width || cy < 0 || cy >= currentState.height) return 1 as CellColor; // 盤面外はPink (1)
+      return newColors[cy][cx];
+    };
+
+    const setCellColor = (cx: number, cy: number, color: CellColor) => {
+      if (cx >= 0 && cx < currentState.width && cy >= 0 && cy < currentState.height) {
+        if (newColors[cy][cx] === 0) {
+          newColors[cy][cx] = color;
+          dotChanged = true;
+        }
+      }
+    };
+
+    const oppositeColor = (c: CellColor): CellColor => c === 1 ? 2 : (c === 2 ? 1 : 0);
+
+    for (let y = 0; y <= currentState.height; y++) {
+      for (let x = 0; x < currentState.width; x++) {
+        const edge = newHLines[y][x];
+        const colorUp = getCellColor(x, y - 1);
+        const colorDown = getCellColor(x, y);
+
+        if (edge === 'line') {
+          if (colorUp !== 0) setCellColor(x, y, oppositeColor(colorUp));
+          if (colorDown !== 0) setCellColor(x, y - 1, oppositeColor(colorDown));
+        } else if (edge === 'cross') {
+          if (colorUp !== 0) setCellColor(x, y, colorUp);
+          if (colorDown !== 0) setCellColor(x, y - 1, colorDown);
+        }
+
+        if (colorUp !== 0 && colorDown !== 0 && edge === 'none') {
+          if (colorUp === colorDown) {
+            newHLines[y][x] = 'cross';
+            dotChanged = true;
+          } else {
+            newHLines[y][x] = 'line';
+            dotChanged = true;
+          }
+        }
+      }
+    }
+
+    for (let y = 0; y < currentState.height; y++) {
+      for (let x = 0; x <= currentState.width; x++) {
+        const edge = newVLines[y][x];
+        const colorLeft = getCellColor(x - 1, y);
+        const colorRight = getCellColor(x, y);
+
+        if (edge === 'line') {
+          if (colorLeft !== 0) setCellColor(x, y, oppositeColor(colorLeft));
+          if (colorRight !== 0) setCellColor(x - 1, y, oppositeColor(colorRight));
+        } else if (edge === 'cross') {
+          if (colorLeft !== 0) setCellColor(x, y, colorLeft);
+          if (colorRight !== 0) setCellColor(x - 1, y, colorRight);
+        }
+
+        if (colorLeft !== 0 && colorRight !== 0 && edge === 'none') {
+          if (colorLeft === colorRight) {
+            newVLines[y][x] = 'cross';
+            dotChanged = true;
+          } else {
+            newVLines[y][x] = 'line';
+            dotChanged = true;
+          }
+        }
+      }
+    }
+
     if (dotChanged) {
       currentState = {
         ...currentState,
         hLines: newHLines,
-        vLines: newVLines
+        vLines: newVLines,
+        cellColors: newColors
       };
       changed = true;
     }
